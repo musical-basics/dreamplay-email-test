@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { fetchV2SSE, type V2ProgressEvent } from "@/lib/v2/sse-client"
 
 
 interface Message {
@@ -51,6 +52,10 @@ export function CopilotPane({ html, onHtmlChange, audienceContext = "dreamplay",
     const [modelMedium, setModelMedium] = useState("claude-sonnet-4-6")
     const [modelHigh, setModelHigh] = useState("claude-opus-4-6")
     const [autoRouting, setAutoRouting] = useState(false)
+
+    // ─── V2 LangGraph Mode ───
+    const [useV2, setUseV2] = useState(false)
+    const [v2Status, setV2Status] = useState<string>("")
 
     useEffect(() => {
         getAnthropicModels().then(models => {
@@ -402,25 +407,43 @@ ${userMessage}`
         setIsLoading(true)
 
         try {
-            // 2. Send to API (Now lightweight because we only send URLs!)
-            const response = await fetch("/api/copilot", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    currentHtml: html,
-                    messages: apiHistory,
-                    model,
-                    audienceContext,
-                    aiDossier,
-                    // Pass tier model preferences for auto-routing
-                    modelLow,
-                    modelMedium,
-                }),
-            })
+            let data: any
 
-            const data = await response.json()
-
-            if (!response.ok) throw new Error(data.error || "Failed to generate code")
+            if (useV2) {
+                // ── V2 LangGraph SSE Path ──
+                setV2Status("Starting...")
+                data = await fetchV2SSE(
+                    "/api/v2/email/generate",
+                    {
+                        currentHtml: html,
+                        messages: apiHistory,
+                        model,
+                        audienceContext,
+                        aiDossier,
+                    },
+                    (event: V2ProgressEvent) => {
+                        if (event.label) setV2Status(event.label)
+                    }
+                )
+                setV2Status("")
+            } else {
+                // ── V1 Classic Path ──
+                const response = await fetch("/api/copilot", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        currentHtml: html,
+                        messages: apiHistory,
+                        model,
+                        audienceContext,
+                        aiDossier,
+                        modelLow,
+                        modelMedium,
+                    }),
+                })
+                data = await response.json()
+                if (!response.ok) throw new Error(data.error || "Failed to generate code")
+            }
 
             if (data.updatedHtml) {
                 onHtmlChange(data.updatedHtml, userMessage)
@@ -436,7 +459,7 @@ ${userMessage}`
                 const costStr = m.cost < 0.01 ? `$${(m.cost * 100).toFixed(2)}¢` : `$${m.cost.toFixed(4)}`;
                 resultMessages.push({
                     role: "details",
-                    content: `${m.model}  ·  ${m.inputTokens.toLocaleString()} in / ${m.outputTokens.toLocaleString()} out  ·  ${costStr}`
+                    content: `${useV2 ? "⚡ V2 · " : ""}${m.model}  ·  ${m.inputTokens.toLocaleString()} in / ${m.outputTokens.toLocaleString()} out  ·  ${costStr}`
                 });
             }
 
@@ -444,6 +467,7 @@ ${userMessage}`
 
         } catch (error: any) {
             console.error("Copilot Error:", error)
+            setV2Status("")
             setMessages(prev => [
                 ...prev,
                 { role: "result", content: `Error: ${error.message}` }
@@ -467,6 +491,19 @@ ${userMessage}`
                 <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-purple-400" />
                     <h2 className="text-sm font-semibold">Copilot Vision</h2>
+                    {/* V2 Toggle */}
+                    <button
+                        onClick={() => setUseV2(!useV2)}
+                        className={cn(
+                            "px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors",
+                            useV2
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        )}
+                        title={useV2 ? "Using V2 LangGraph pipeline" : "Using V1 classic pipeline"}
+                    >
+                        {useV2 ? "V2" : "V1"}
+                    </button>
                     {/* Session Picker */}
                     {campaignId && (
                         <div className="relative" ref={sessionPickerRef}>
@@ -582,7 +619,7 @@ ${userMessage}`
                 {isLoading && (
                     <div className="mr-auto flex items-center gap-2 text-muted-foreground text-sm p-2">
                         <Brain className="w-4 h-4 animate-pulse" />
-                        Thinking...
+                        {useV2 && v2Status ? v2Status : "Thinking..."}
                     </div>
                 )}
             </div>
