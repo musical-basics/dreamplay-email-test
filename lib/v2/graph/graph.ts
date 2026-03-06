@@ -16,10 +16,9 @@ import { criticNode } from "./nodes/critic"
  *                                   │
  *                                (PASS) → END
  *
- * The Analyst routes and classifies intent.
- * The Researcher gathers audience context + knowledge search.
- * The Drafter generates HTML via Claude.
- * The Critic validates and may loop back (max 2 revisions).
+ * Options:
+ * - interruptBeforeCritic: If true, the graph pauses before the critic node
+ *   for human review. Use the Command-based resume endpoint to continue.
  */
 
 function routeAfterCritic(state: EmailState): string {
@@ -30,11 +29,20 @@ function routeAfterCritic(state: EmailState): string {
     return END
 }
 
+interface BuildOptions {
+    /**
+     * If true, adds an interruptBefore breakpoint on the critic node.
+     * This pauses the graph after Drafter completes, allowing the user
+     * to review the draft before QA runs. Resume via Command object.
+     */
+    interruptBeforeCritic?: boolean
+}
+
 /**
  * Build the compiled V2 email generation graph.
  * Checkpointer uses v2_ai_schema (pre-provisioned, no setup()).
  */
-export function buildEmailGraph() {
+export function buildEmailGraph(options: BuildOptions = {}) {
     const checkpointer = getCheckpointer()
 
     const graph = new StateGraph(EmailGraphState)
@@ -58,5 +66,12 @@ export function buildEmailGraph() {
             [END]: END,
         })
 
-    return graph.compile({ checkpointer })
+    const compileOptions: Record<string, unknown> = { checkpointer }
+
+    if (options.interruptBeforeCritic) {
+        compileOptions.interruptBefore = ["critic"]
+    }
+
+    return graph.compile(compileOptions)
 }
+
