@@ -5,6 +5,7 @@ import { scheduledCampaignSend } from "@/inngest/functions/scheduled-send";
 import { genericChainRunner } from "@/inngest/functions/chains/generic";
 import { audienceEnrichment } from "@/inngest/functions/audience-enrichment";
 import { customizeAbandonment } from "@/inngest/functions/chains/behavioral";
+import { v2EmailGeneration } from "@/inngest/functions/v2-email-generation";
 
 export const { GET, POST, PUT } = serve({
     client: inngest,
@@ -14,5 +15,6 @@ export const { GET, POST, PUT } = serve({
         genericChainRunner,
         audienceEnrichment,
         customizeAbandonment,
+        v2EmailGeneration,
     ],
 });
